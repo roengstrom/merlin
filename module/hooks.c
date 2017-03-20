@@ -333,7 +333,9 @@ static int hook_service_result(merlin_event *pkt, void *data)
 
 	case NEBTYPE_SERVICECHECK_PROCESSED:
 		unexpire_service(s);
-		if (merlin_sender) {
+		node = pgroup_service_node(s->id);
+		pkt->hdr.selection = DEST_PEERS_MASTERS;
+		if (merlin_sender && node != &ipc) {
 			/* network-received events mustn't bounce back */
 			pkt->hdr.code = MAGIC_NONET;
 			set_service_check_node(merlin_sender, s, s->check_type == CHECK_TYPE_PASSIVE);
@@ -342,7 +344,6 @@ static int hook_service_result(merlin_event *pkt, void *data)
 			 * check results should always be sent to peers and masters if
 			 * generated locally.
 			 */
-			pkt->hdr.selection = DEST_PEERS_MASTERS;
 			set_service_check_node(&ipc, s, ds->check_type == CHECK_TYPE_PASSIVE);
 		}
 
@@ -390,7 +391,8 @@ static int hook_host_result(merlin_event *pkt, void *data)
 	/* only send processed host checks */
 	case NEBTYPE_HOSTCHECK_PROCESSED:
 		unexpire_host(h);
-		if (merlin_sender) {
+		node = pgroup_host_node(h->id);
+		if (merlin_sender && node != &ipc) {
 			/* network-received events mustn't bounce back */
 			pkt->hdr.code = MAGIC_NONET;
 			set_host_check_node(merlin_sender, h, h->check_type == CHECK_TYPE_PASSIVE);
@@ -872,6 +874,7 @@ static neb_cb_result * hook_notification(merlin_event *pkt, void *data)
 	struct service *s = NULL;
 	struct host *h = NULL;
 	const char *owning_node_name = NULL;
+	merlin_node *node = NULL;
 
 	if (ds->type == NEBTYPE_NOTIFICATION_END) {
 
@@ -911,8 +914,8 @@ static neb_cb_result * hook_notification(merlin_event *pkt, void *data)
 		 * until next check result is sent.
 		 */
 		if(ds->reason_type == NOTIFICATION_CUSTOM || merlin_sender) {
-			if (merlin_sender)
-				pkt->hdr.selection = get_sel_id(merlin_sender->hostgroups);
+			//if (merlin_sender)
+			//	pkt->hdr.selection = get_sel_id(merlin_sender->hostgroups);
 			ret = send_generic(pkt, data);
 		} else {
 			ret = hold_notification_packet(pkt, ds);
@@ -929,12 +932,14 @@ static neb_cb_result * hook_notification(merlin_event *pkt, void *data)
 		s = (service *)ds->object_ptr;
 		check_type = s->check_type;
 		id = s->id;
+		node = pgroup_service_node(id);
 		ldebug("notif: Checking service notification for %s;%s",
 		       s->host_name, s->description);
 	} else {
 		h = (struct host *)ds->object_ptr;
 		id = h->id;
 		check_type = h->check_type;
+		node = pgroup_host_node(id);
 		ldebug("notif: Checking host notification for %s", h->name);
 	}
 
@@ -965,7 +970,7 @@ static neb_cb_result * hook_notification(merlin_event *pkt, void *data)
 	 * If the sender is not a poller, we should handle the notification if we
 	 * are responsible for the check of that object, as usual
 	 */
-	if (merlin_sender) {
+	if (merlin_sender && recv_event && recv_event->hdr.type != NEBCALLBACK_EXTERNAL_COMMAND_DATA) {
 		ldebug("notif: merlin_sender is %s %s", node_type(merlin_sender), merlin_sender->name);
 		ldebug("notif: merlin_sender->flags: %d", merlin_sender->flags);
 		if (merlin_sender->type == MODE_POLLER && merlin_sender->flags & MERLIN_NODE_NOTIFIES) {
