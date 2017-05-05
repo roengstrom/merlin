@@ -105,7 +105,7 @@ static int send_generic(merlin_event *pkt, void *data)
 			memcpy(&last_pkt, pkt, packet_size(pkt));
 	}
 
-	if (!num_nodes)
+	if (!num_nodes || pkt->hdr.code == MAGIC_NONET)
 		return 0;
 
 	/*
@@ -331,10 +331,21 @@ static int hook_service_result(merlin_event *pkt, void *data)
 
 	case NEBTYPE_SERVICECHECK_PROCESSED:
 		unexpire_service(s);
-		if (merlin_sender) {
-			/* network-received events mustn't bounce back */
-			pkt->hdr.code = MAGIC_NONET;
-			set_service_check_node(merlin_sender, s, s->check_type == CHECK_TYPE_PASSIVE);
+		if (merlin_sender && recv_event) {
+			/*
+			 * this processed check result was processed as a result of a
+			 * packet of some sort. could have been another node that ran the
+			 * check and sent us the result or it could've been another node
+			 * that sent us an external command, such as a passive check result
+			 * which we then processed.
+			 *
+			 * so we must determine here if this result should be sent or not
+			 * to other node to make sure packets don't start bouncing around
+			 */
+			if (recv_event->hdr.type == NEBCALLBACK_SERVICE_CHECK_DATA || recv_event->hdr.type == NEBCALLBACK_SERVICE_STATUS_DATA) {
+				pkt->hdr.code = MAGIC_NONET;
+				set_service_check_node(merlin_sender, s, s->check_type == CHECK_TYPE_PASSIVE);
+			}
 		} else {
 			/*
 			 * check results should always be sent to peers and masters if
@@ -388,10 +399,21 @@ static int hook_host_result(merlin_event *pkt, void *data)
 	/* only send processed host checks */
 	case NEBTYPE_HOSTCHECK_PROCESSED:
 		unexpire_host(h);
-		if (merlin_sender) {
-			/* network-received events mustn't bounce back */
-			pkt->hdr.code = MAGIC_NONET;
-			set_host_check_node(merlin_sender, h, h->check_type == CHECK_TYPE_PASSIVE);
+		if (merlin_sender && recv_event) {
+			/*
+			 * this processed check result was processed as a result of a
+			 * packet of some sort. could have been another node that ran the
+			 * check and sent us the result or it could've been another node
+			 * that sent us an external command, such as a passive check result
+			 * which we then processed.
+			 *
+			 * so we must determine here if this result should be sent or not
+			 * to other node to make sure packets don't start bouncing around
+			 */
+			if (recv_event->hdr.type == NEBCALLBACK_HOST_CHECK_DATA || recv_event->hdr.type == NEBCALLBACK_HOST_STATUS_DATA) {
+				pkt->hdr.code = MAGIC_NONET;
+				set_host_check_node(merlin_sender, h, h->check_type == CHECK_TYPE_PASSIVE);
+			}
 		} else {
 			/* check results should always be sent to peers and masters */
 			pkt->hdr.selection = DEST_PEERS_MASTERS;
